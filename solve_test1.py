@@ -285,56 +285,55 @@ def run_task_1():
 
 
 def classify_ports(open_ports):
-    """Actively probes open ports to accurately classify SSH, HTTP, Archive, and Bind Shell."""
-    ssh_port = None
-    web_port = None
+    """Actively probes every open port with real protocol handshakes (SSH, HTTP, Tar.gz, Shell)."""
+    ssh_ports = []
+    web_ports = []
     raw_ports = []
 
-    for port, desc in sorted(open_ports.items()):
-        d = desc.lower()
-        if "ssh" in d and "http" not in d:
-            ssh_port = port
-        elif "http" in d or "apache" in d or "nginx" in d or "werkzeug" in d:
-            web_port = port
-
-    # Active probing for any unclassified or ambiguous ports
     for port in sorted(open_ports.keys()):
-        if port == ssh_port or port == web_port:
-            continue
-        # Check if SSH banner
+        is_classified = False
+
+        # 1. Active HTTP handshake check (never trust port number alone)
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(1.5)
+            s.settimeout(1.8)
             s.connect((TARGET, port))
-            banner_bytes = s.recv(256)
+            s.sendall(f"GET / HTTP/1.0\r\nHost: {TARGET}\r\n\r\n".encode())
+            resp = s.recv(1024)
+            s.close()
+            if resp.startswith(b"HTTP/") or b"<!doctype html" in resp.lower() or b"<html" in resp.lower():
+                web_ports.append(port)
+                continue
+        except Exception:
+            pass
+
+        # 2. Active SSH / Archive banner check
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(1.8)
+            s.connect((TARGET, port))
+            banner_bytes = s.recv(512)
             s.close()
             if banner_bytes.startswith(b"SSH-"):
-                ssh_port = port
+                ssh_ports.append(port)
                 continue
-            if banner_bytes.startswith(b"\x1f\x8b"):
+            if banner_bytes.startswith(b"\x1f\x8b") or banner_bytes.startswith(b"BZh") or b"ustar" in banner_bytes:
                 raw_ports.append(port)
                 continue
         except Exception:
             pass
 
-        # Check if HTTP server
-        if web_port is None:
-            try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.settimeout(1.5)
-                s.connect((TARGET, port))
-                s.sendall(f"GET / HTTP/1.0\r\nHost: {TARGET}\r\n\r\n".encode())
-                resp = s.recv(512)
-                s.close()
-                if b"HTTP/" in resp or b"<html" in resp.lower():
-                    web_port = port
-                    continue
-            except Exception:
-                pass
+        # 3. Fallback to Nmap service description if banner timed out
+        desc = open_ports.get(port, "").lower()
+        if "ssh" in desc and "http" not in desc:
+            ssh_ports.append(port)
+        else:
+            raw_ports.append(port)
 
-        raw_ports.append(port)
-
-    return ssh_port, web_port, raw_ports
+    # Prefer non-22 SSH port if multiple SSH ports exist (or test all of them)
+    ssh_port = ssh_ports[-1] if ssh_ports else None
+    web_port = web_ports[0] if web_ports else None
+    return ssh_port, web_port, raw_ports, ssh_ports, web_ports
 
 
 # ---------------------------------------------------------------------------
@@ -361,6 +360,18 @@ def run_task_3(web_port):
     log_info(f"[Task 3] Enumerating HTTP GET parameter ?id=1..100 on port {web_port}...")
     endpoints = ["/", "/index.php", "/index.html"]
 
+    # Also scrape homepage for any local links/forms (e.g., /item.php?id=1)
+    try:
+        with urllib.request.urlopen(f"http://{TARGET}:{web_port}/", timeout=2.5) as r0:
+            home_html = r0.read().decode("utf-8", errors="ignore")
+            for link in re.findall(r'(?:href|action)=["\']?([^"\' >?#]+)', home_html, re.I):
+                if not link.startswith("http"):
+                    ep = "/" + link.lstrip("/")
+                    if ep not in endpoints:
+                        endpoints.insert(0, ep)
+    except Exception:
+        pass
+
     def check_id(args):
         ep, idx = args
         url = f"http://{TARGET}:{web_port}{ep}?id={idx}"
@@ -384,7 +395,7 @@ def run_task_3(web_port):
             pass
         return None
 
-    tasks = [(ep, i) for ep in endpoints for i in range(1, 101)]
+    tasks = [(ep, i) for ep in endpoints for i in range(0, 101)]
     with ThreadPoolExecutor(max_workers=25) as ex:
         futures = [ex.submit(check_id, t) for t in tasks]
         for fut in as_completed(futures):
@@ -395,7 +406,7 @@ def run_task_3(web_port):
                 log_success(3, "Param Enumeration", fl)
                 return
 
-    log_warn("[Task 3] Flag not found in ?id=1..100.")
+    log_warn("[Task 3] Flag not found in ?id=0..100.")
 
 
 # ---------------------------------------------------------------------------
@@ -749,28 +760,32 @@ def main():
     print("-" * 65)
 
     # 2. Active Port Classification
-    ssh_port, web_port, raw_ports = classify_ports(open_ports)
-    log_info(f"Classified Services -> SSH: {ssh_port} | HTTP: {web_port} | Raw TCP: {raw_ports}")
+    ssh_port, web_port, raw_ports, ssh_ports, web_ports = classify_ports(open_ports)
+    log_info(f"Classified Services -> SSH: {ssh_ports} | HTTP: {web_ports} | Raw TCP: {raw_ports}")
 
     # 3. Task 2: SSH Search in ~/haystack
-    if ssh_port:
-        run_task_2(ssh_port)
+    for sp in reversed(ssh_ports):
+        if 2 not in FLAGS:
+            run_task_2(sp)
 
     # 4. Task 3: HTTP GET Parameter Enumeration
-    if web_port:
-        run_task_3(web_port)
+    for wp in web_ports:
+        if 3 not in FLAGS:
+            run_task_3(wp)
 
     # 5. Task 4: Web File Enumeration
-    if web_port:
-        run_task_4(web_port, ssh_port=ssh_port)
+    for wp in web_ports:
+        if 4 not in FLAGS:
+            run_task_4(wp, ssh_port=ssh_port)
 
     # 6. Tasks 5 & 6: Archive Transfer & Bind Shell
     if raw_ports:
         inspect_raw_ports(raw_ports)
 
     # 7. Task 7: Admin SUID Binary
-    if ssh_port:
-        run_task_7(ssh_port)
+    for sp in reversed(ssh_ports):
+        if 7 not in FLAGS:
+            run_task_7(sp)
 
     # Summary Table
     print("\n" + "=" * 68)
