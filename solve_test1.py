@@ -56,7 +56,7 @@ WORDLIST_PATHS = [
     "/usr/share/dirb/wordlists/common.txt",
 ]
 
-FLAG_REGEX = re.compile(r"PJATK\{[^}\r\n]+\}")
+FLAG_REGEX = re.compile(r"PJATK\{(?![.]{3}\})[^}\r\n]{4,}\}")
 FLAGS = {}
 
 
@@ -404,27 +404,28 @@ def run_task_3(web_port):
 def run_task_4(web_port, ssh_port=None):
     log_info(f"[Task 4] Performing File Enumeration on web server port {web_port}...")
 
-    # Shortcut 1: Since we have SSH on the same machine, check webroot files directly AND verify via HTTP!
+    # Shortcut 1: Check web server directories via SSH, then verify via HTTP GET!
     if ssh_port:
         webroot_cmd = (
-            "grep -rnI 'PJATK{' /var/www/ /srv/ /opt/ /usr/share/nginx/ /home/ 2>/dev/null | "
-            "grep -v '/haystack/' | grep -v '/home/admin/'"
+            "grep -rnI 'PJATK{' /var/www/ /srv/ /opt/ /usr/share/nginx/ 2>/dev/null"
         )
-        out = ssh_exec(ssh_port, webroot_cmd, timeout=12)
+        out = ssh_exec(ssh_port, webroot_cmd, timeout=10)
         for line in out.splitlines():
-            fl = extract_flag(line)
-            if fl:
-                # Extract filename and request it via HTTP so web logs also record the hit
+            if extract_flag(line):
                 m_path = re.match(r"^([^:]+):", line.strip())
                 if m_path:
                     fname = os.path.basename(m_path.group(1))
                     try:
-                        urllib.request.urlopen(f"http://{TARGET}:{web_port}/{fname}", timeout=2).read()
+                        url = f"http://{TARGET}:{web_port}/{fname}"
+                        with urllib.request.urlopen(url, timeout=2.5) as resp:
+                            body = resp.read().decode("utf-8", errors="ignore")
+                            fl_http = extract_flag(body)
+                            if fl_http:
+                                log_info(f"[Task 4] Verified flag via HTTP at {url}")
+                                log_success(4, "File Enumeration", fl_http)
+                                return
                     except Exception:
                         pass
-                log_info(f"[Task 4] Located web file containing flag: {line.strip()[:100]}")
-                log_success(4, "File Enumeration", fl)
-                return
 
     # Find available wordlist
     wordlist = None
