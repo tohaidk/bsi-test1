@@ -8,8 +8,8 @@ Works on ANY Kali / Linux machine (personal laptop OR fresh university PC)
 with ZERO external Python package dependencies required!
 
 Features:
-1. Task 1 (Open Ports): Runs exact required Nmap scan (-sV -sC -T5 -p 20-100,
-   1200-1250,8000-8100) + XML/text parsing + raw socket fallback verification
+1. Task 1 (Open Ports): Runs full-range Nmap scan (-sV -sC -T5 --min-rate 2000
+   -p-) + XML/text parsing + all-port raw socket fallback verification
    + active probe classification (SSH, HTTP, Tar.gz stream, Bind Shell).
 2. Task 2 (Search): Multi-engine SSH execution (paramiko -> sshpass -> native
    Python PTY ssh) searching ~/haystack (including hidden/encoded files).
@@ -218,12 +218,14 @@ def check_target():
 # Task 1: Nmap Scan & Active Service Fingerprinting
 # ---------------------------------------------------------------------------
 def run_task_1():
-    log_info("[Task 1] Running required Nmap scan (-sV -sC -T5 -p 20-100,1200-1250,8000-8100)...")
+    log_info("[Task 1] Running full-range Nmap scan (-sV -sC -T5 --min-rate 2000 -p-)...")
     nmap_txt = "/tmp/test1_nmap.txt"
     nmap_xml = "/tmp/test1_nmap.xml"
+    # Full port range: ports vary per exam VM (classmates saw 1335, 9034, etc.),
+    # so scan all 65535 instead of fixed ranges. --min-rate keeps -p- fast (~1-2 min).
     cmd = [
-        "nmap", "-sV", "-sC", "-T5",
-        "-p", "20-100,1200-1250,8000-8100",
+        "nmap", "-sV", "-sC", "-T5", "--min-rate", "2000",
+        "-p-",
         TARGET,
         "-oN", nmap_txt,
         "-oX", nmap_xml,
@@ -265,18 +267,18 @@ def run_task_1():
                     if p not in open_ports:
                         open_ports[p] = f"{m.group(2)} {m.group(3).strip()}".strip()
 
-    # Fallback TCP scan across all target ranges in case -T5 dropped packets
+    # Fallback TCP scan across ALL ports in case -T5 dropped packets
     if len(open_ports) < 4:
-        log_info("[Task 1] Running fast TCP verification across target port ranges...")
-        target_ranges = list(range(20, 101)) + list(range(1200, 1251)) + list(range(8000, 8101))
+        log_info("[Task 1] Running fast TCP verification across all 65535 ports...")
+        target_ranges = range(1, 65536)
         def probe_port(p):
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(0.6)
+            s.settimeout(0.5)
             ok = (s.connect_ex((TARGET, p)) == 0)
             s.close()
             return p if ok else None
 
-        with ThreadPoolExecutor(max_workers=60) as ex:
+        with ThreadPoolExecutor(max_workers=400) as ex:
             for res_p in ex.map(probe_port, target_ranges):
                 if res_p and res_p not in open_ports:
                     open_ports[res_p] = "unknown"
