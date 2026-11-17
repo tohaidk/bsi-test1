@@ -218,13 +218,13 @@ def check_target():
 # Task 1: Nmap Scan & Active Service Fingerprinting
 # ---------------------------------------------------------------------------
 def run_task_1():
-    log_info("[Task 1] Running full-range Nmap scan (-sV -sC -T5 --min-rate 2000 -p-)...")
+    log_info("[Task 1] Running full-range Nmap scan (-Pn -sV -sC -T5 --min-rate 2000 -p-)...")
     nmap_txt = "/tmp/test1_nmap.txt"
     nmap_xml = "/tmp/test1_nmap.xml"
     # Full port range: ports vary per exam VM (classmates saw 1335, 9034, etc.),
     # so scan all 65535 instead of fixed ranges. --min-rate keeps -p- fast (~1-2 min).
     cmd = [
-        "nmap", "-sV", "-sC", "-T5", "--min-rate", "2000",
+        "nmap", "-Pn", "-sV", "-sC", "-T5", "--min-rate", "2000",
         "-p-",
         TARGET,
         "-oN", nmap_txt,
